@@ -1,0 +1,113 @@
+---
+title: "CSE280A_project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(stringr)
+library(data.table)
+library("biomaRt")
+library(purrr)
+
+```
+
+```{r}
+structures = read.table(file = "CCLE/AC_default/ccle_amplicon_classification_profiles.tsv", header = T, sep = "\t")
+cyclic = structures %>% filter(amplicon_decomposition_class == "Cyclic")
+cyclic$sample_name = as.character(cyclic$sample_name)
+cyclic$amplicon_number = as.character(cyclic$amplicon_number)
+cyclic = cyclic %>% mutate(bedname = paste(paste(sample_name, amplicon_number, sep = "_"), amplicon_number,sep = "_"))
+#cyclic = cyclic %>% mutate(tissue_type = str_split(sample_name,"_"))
+```
+
+```{r}
+files <- list.files(path="CCLE/AC_default/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE)
+beds = lapply(files, function(x) {
+    cutted_x = gsub("CCLE/AC_default/classification_bed_files/","",x)
+    cutted_x = gsub("_ecDNA_1_intervals.bed","",cutted_x)
+    cutted_x = gsub("_other_1_intervals.bed","",cutted_x)
+    cutted_x = gsub("_BFB_1_intervals.bed","",cutted_x)
+    if (cutted_x %in% cyclic$bedname){
+
+      bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
+      bed$tissue = cutted_x
+      return(bed)
+    }
+})
+data = as.data.frame(do.call(rbind, beds))
+
+data = data %>% mutate(tissue_type = strsplit(data$tissue,"_")%>% map_chr(., 2))
+
+```
+
+```{r}
+data = data %>% mutate(query = paste(paste(gsub("chr","",chromosome),start,sep=":"),end,sep=":"))
+head(data)
+
+```
+
+```{r}
+
+listMarts(host="www.ensembl.org")
+ensembl = useMart(biomart = "ENSEMBL_MART_ENSEMBL",dataset="hsapiens_gene_ensembl")
+filters = listFilters(ensembl)
+
+```
+
+```{r}
+# results=getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position","gene_biotype"),filters = c("chromosomal_region"),values = list(chromosomal_region=unlist(as.list(data$query))), mart = ensembl)
+# results
+
+# gene_in_intervals = lapply(data$query, function(x){
+#   result = getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position","gene_biotype","chromosomal_region"),filters = c("chromosomal_region"),values = x, mart = ensembl)
+#   print(result)
+#   if (dim(result)[1] > 0){
+#     result$source = x
+#   }
+#   return(result)
+# })
+# 
+# genes_in_intervals = as.data.frame(do.call(rbind, gene_in_intervals))
+```
+```{r}
+attr = listAttributes(ensembl)
+```
+
+getting location of oncogenes
+```{r}
+oncogenes = read.table("Oncogene list_ONGene.txt",sep="\t",header=T)
+
+oncogene_ids=getBM(attributes = c("hgnc_symbol","ensembl_gene_id","start_position", "end_position","chromosome_name"),filters = c("hgnc_symbol"),values = unlist(as.list(oncogenes$OncogeneName)), mart = ensembl)
+
+added = data.frame(matrix(0, nrow = nrow(oncogene_ids), ncol = length(unique(data$tissue_type))))
+colnames(added) = unique(data$tissue_type)
+
+oncogene_ids = cbind(oncogene_ids,added)
+oncogene_ids$length = oncogene_ids$end_position - oncogene_ids$start_position
+oncogene_ids$chromosome_name = paste("chr",oncogene_ids$chromosome_name,sep = "")
+
+```
+
+
+
+```{r}
+for (j in 1:nrow(oncogene_ids)){
+  for (i in 1:nrow(data)){
+    if ((oncogene_ids[j,'start_position'] >= (data[i,'start'] - oncogene_ids[j,'length']/3)) && (oncogene_ids[j,'end_position'] <= (data[i,'end'] + oncogene_ids[j,'length']/3)) && 
+        oncogene_ids[j,'chromosome_name']  == data[i,"chromosome"]){
+      if((data[i,'tissue_type'] == "BREAST") && (oncogene_ids[j,"hgnc_symbol"] == "BRF2")){
+        print("i")
+        print(i)
+        print("j")
+        print(j)
+        print(oncogene_ids[j,data[i,'tissue_type']])
+      }
+      oncogene_ids[j,data[i,'tissue_type']] <-  (oncogene_ids[j,data[i,'tissue_type']] + 1)
+    }
+  }
+}
+```
+
