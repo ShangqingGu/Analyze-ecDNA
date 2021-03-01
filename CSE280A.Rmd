@@ -11,7 +11,9 @@ library(stringr)
 library(data.table)
 library("biomaRt")
 library(purrr)
-
+library(fuzzyjoin)
+library(ggplot2)
+library(plyr)
 ```
 
 ```{r}
@@ -20,34 +22,24 @@ cyclic = structures %>% filter(amplicon_decomposition_class == "Cyclic")
 cyclic$sample_name = as.character(cyclic$sample_name)
 cyclic$amplicon_number = as.character(cyclic$amplicon_number)
 cyclic = cyclic %>% mutate(bedname = paste(paste(sample_name, amplicon_number, sep = "_"), amplicon_number,sep = "_"))
-#cyclic = cyclic %>% mutate(tissue_type = str_split(sample_name,"_"))
 ```
 
 ```{r}
-files <- list.files(path="CCLE/AC_default/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE)
-beds = lapply(files, function(x) {
-    cutted_x = gsub("CCLE/AC_default/classification_bed_files/","",x)
-    cutted_x = gsub("_ecDNA_1_intervals.bed","",cutted_x)
-    cutted_x = gsub("_other_1_intervals.bed","",cutted_x)
-    cutted_x = gsub("_BFB_1_intervals.bed","",cutted_x)
-    if (cutted_x %in% cyclic$bedname){
+files <- data.frame(list.files(path="CCLE/AC_default/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE))
+colnames(files) = "file"
+cyclic_files = grep(paste(cyclic$bedname,collapse="|"), 
+                        files$file, value=TRUE)
 
-      bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
-      bed$tissue = cutted_x
-      return(bed)
-    }
+beds = lapply(cyclic_files, function(x) {
+  bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
+      bed$tissue = gsub("CCLE/AC_default/classification_bed_files/","",x)
+  return(bed)
 })
 data = as.data.frame(do.call(rbind, beds))
-
 data = data %>% mutate(tissue_type = strsplit(data$tissue,"_")%>% map_chr(., 2))
-
+head(data,10)
 ```
 
-```{r}
-data = data %>% mutate(query = paste(paste(gsub("chr","",chromosome),start,sep=":"),end,sep=":"))
-head(data)
-
-```
 
 ```{r}
 
@@ -72,14 +64,14 @@ filters = listFilters(ensembl)
 # 
 # genes_in_intervals = as.data.frame(do.call(rbind, gene_in_intervals))
 ```
-```{r}
-attr = listAttributes(ensembl)
-```
 
 getting location of oncogenes
 ```{r}
-oncogenes = read.table("Oncogene list_ONGene.txt",sep="\t",header=T)
+oncogenes = read.table("Oncogene list_ONGene.txt",sep="\t",header=T,quote = "")
 
+```
+
+```{r}
 oncogene_ids=getBM(attributes = c("hgnc_symbol","ensembl_gene_id","start_position", "end_position","chromosome_name"),filters = c("hgnc_symbol"),values = unlist(as.list(oncogenes$OncogeneName)), mart = ensembl)
 
 added = data.frame(matrix(0, nrow = nrow(oncogene_ids), ncol = length(unique(data$tissue_type))))
@@ -89,25 +81,84 @@ oncogene_ids = cbind(oncogene_ids,added)
 oncogene_ids$length = oncogene_ids$end_position - oncogene_ids$start_position
 oncogene_ids$chromosome_name = paste("chr",oncogene_ids$chromosome_name,sep = "")
 
+
 ```
 
 
+Saving intervals for each Oncogene
+```{r}
+ecDNA_loc = vector(mode="list", length=length(oncogene_ids$hgnc_symbol))
+names(ecDNA_loc) = oncogene_ids$hgnc_symbol
+```
 
+Making Oncogene-Tissue_type Table
 ```{r}
 for (j in 1:nrow(oncogene_ids)){
   for (i in 1:nrow(data)){
     if ((oncogene_ids[j,'start_position'] >= (data[i,'start'] - oncogene_ids[j,'length']/3)) && (oncogene_ids[j,'end_position'] <= (data[i,'end'] + oncogene_ids[j,'length']/3)) && 
         oncogene_ids[j,'chromosome_name']  == data[i,"chromosome"]){
-      if((data[i,'tissue_type'] == "BREAST") && (oncogene_ids[j,"hgnc_symbol"] == "BRF2")){
-        print("i")
-        print(i)
-        print("j")
-        print(j)
-        print(oncogene_ids[j,data[i,'tissue_type']])
-      }
+      # print(data[i,'tissue_type'])
+      # print(oncogene_ids[j,'start_position'])
+      # print(oncogene_ids[j,'end_position'])
+      # print(data[i,'start'])
+      # print(data[i,'end'])
       oncogene_ids[j,data[i,'tissue_type']] <-  (oncogene_ids[j,data[i,'tissue_type']] + 1)
+      ecDNA_loc[oncogene_ids[j,'hgnc_symbol']][[1]] = append(ecDNA_loc[oncogene_ids[j,'hgnc_symbol']][[1]],rbind(data[i,'start'], data[i,'end']))
     }
   }
 }
+```
+
+```{r}
+head(oncogene_ids,20)
+write.csv(oncogene_ids,"oncogene_tissue_type.csv",row.names = F)
+write.csv(data,"data.csv",row.names = F)
+
+```
+
+```{r}
+sum_happened = oncogene_ids %>% mutate(sum = rowSums(oncogene_ids[,6:25]))
+sum_happened = sum_happened %>% arrange(desc(sum))
+top = sum_happened %>% filter(sum >= 4) %>% dplyr::select(hgnc_symbol)
+
+```
+
+```{r}
+files_df = data.frame(files)
+tissue_types = data.frame(unique(data$tissue_type))
+colnames(tissue_types) = "Tissue"
+files_df = files_df %>% regex_inner_join(tissue_types,by = c(file = "Tissue")) %>% group_by(Tissue) %>% summarise(Files_n = n())
+
+cyclic_files_df = data.frame(cyclic_files) 
+colnames(cyclic_files_df) = "files"
+cyclic_files_df = cyclic_files_df %>% regex_inner_join(tissue_types,by = c(files = "Tissue")) %>% group_by(Tissue) %>% summarise(Cyclic_n = n())
+
+all = inner_join(cyclic_files_df,files_df,by = c(Tissue = "Tissue"))
+
+```
+
+```{r fig.height=5}
+
+all.long = gather(all, variable,value, -Tissue)
+ggplot(data = all.long, aes(x = Tissue, y = value, fill = variable)) +
+  geom_col(position = position_dodge(),stat = "identity") + xlab("Tissue Type") + ylab("Number of files") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + geom_text(aes(label = value), position=position_dodge(width=0.9), vjust=-0.25)
+ggsave("tissue_distribution.jpg")
+```
+
+```{r}
+columns = c("hgnc_symbol",tissue_types$Tissue)
+filtered_table = oncogene_ids[,columns]
+non_zero_oncogenes = filtered_table[apply(filtered_table[,-1], 1, function(x) !all(x==0)),]
+oncogene_sum = non_zero_oncogenes %>% mutate(n_total_oncogene = rowSums(non_zero_oncogenes[,2:21])) %>% arrange(desc(n_total_oncogene))
+write.csv(oncogene_sum,"compacted.csv",row.names = F)
+write.table(all,"tissue_files.tsv",row.names = F)
+```
+
+```{r}
+top_intervals = ecDNA_loc[top$hgnc_symbol]
+top_df = as.data.frame(as.matrix(top_intervals))
+top_df2 = data.frame(lapply(top_df, as.character), stringsAsFactors=FALSE)
+row.names(top_df2) = top$hgnc_symbol
+write.csv(top_df2, file="top_oncogene_intervals.csv")
 ```
 
