@@ -17,7 +17,7 @@ library(plyr)
 ```
 
 ```{r}
-structures = read.table(file = "CCLE/AC_default/ccle_amplicon_classification_profiles.tsv", header = T, sep = "\t")
+structures = read.table(file = "~/Desktop/Project/CCLE/AC_default/ccle_amplicon_classification_profiles.tsv", header = T, sep = "\t")
 cyclic = structures %>% filter(amplicon_decomposition_class == "Cyclic")
 cyclic$sample_name = as.character(cyclic$sample_name)
 cyclic$amplicon_number = as.character(cyclic$amplicon_number)
@@ -25,14 +25,14 @@ cyclic = cyclic %>% mutate(bedname = paste(paste(sample_name, amplicon_number, s
 ```
 
 ```{r}
-files <- data.frame(list.files(path="CCLE/AC_default/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE))
+files <- data.frame(list.files(path="~/Desktop/Project/CCLE/AC_default/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE))
 colnames(files) = "file"
 cyclic_files = grep(paste(cyclic$bedname,collapse="|"), 
                         files$file, value=TRUE)
 
 beds = lapply(cyclic_files, function(x) {
   bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
-      bed$tissue = gsub("CCLE/AC_default/classification_bed_files/","",x)
+      bed$tissue = gsub("~/Desktop/Project/CCLE/AC_default/classification_bed_files/","",x)
   return(bed)
 })
 data = as.data.frame(do.call(rbind, beds))
@@ -158,7 +158,18 @@ write.table(all,"tissue_files.tsv",row.names = F)
 top_intervals = ecDNA_loc[top$hgnc_symbol]
 top_df = as.data.frame(as.matrix(top_intervals))
 top_df2 = data.frame(lapply(top_df, as.character), stringsAsFactors=FALSE)
-row.names(top_df2) = top$hgnc_symbol
+top_df$oncogene = top$hgnc_symbol
 write.csv(top_df2, file="top_oncogene_intervals.csv")
+```
+
+```{r}
+sink("top_oncogene_intervals.txt")
+for (i in 1:nrow(top_df)){
+  cat(top_df[i,"oncogene"])
+  cat("\t")
+  cat(unlist(top_df[i,'V1'][[1]]))
+  cat("\n")
+}
+sink()
 ```
 
