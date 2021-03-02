@@ -17,6 +17,7 @@ library(plyr)
 ```
 
 ```{r}
+oncogenes = read.table("Oncogene list_ONGene.txt",sep="\t",header=T,quote = "")
 structures = read.table(file = "~/Desktop/Project/CCLE/AC_default/ccle_amplicon_classification_profiles.tsv", header = T, sep = "\t")
 cyclic = structures %>% filter(amplicon_decomposition_class == "Cyclic")
 cyclic$sample_name = as.character(cyclic$sample_name)
@@ -32,12 +33,78 @@ cyclic_files = grep(paste(cyclic$bedname,collapse="|"),
 
 beds = lapply(cyclic_files, function(x) {
   bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
-      bed$tissue = gsub("~/Desktop/Project/CCLE/AC_default/classification_bed_files/","",x)
+      bed$tissue = gsub("/Users/heliz/Desktop/Project/CCLE/AC_default/classification_bed_files/","",x)
   return(bed)
 })
 data = as.data.frame(do.call(rbind, beds))
 data = data %>% mutate(tissue_type = strsplit(data$tissue,"_")%>% map_chr(., 2))
 head(data,10)
+
+```
+
+more Data
+```{r}
+structures2 = read.table(file = "~/Desktop/Project/PancancerECDNACellLine_classification_results_122320/PancancerECDNA_samplefiles_amplicon_classification_profiles.tsv", header = T, sep = "\t")
+Cyclic2 = structures2 %>% filter(amplicon_decomposition_class == "Cyclic")
+Cyclic2 = Cyclic2 %>%  mutate(gene = strsplit(sample_name,"_") %>% map_chr(.,2)) %>% filter(gene %in% oncogenes$OncogeneName) %>% mutate(cell_line = strsplit(sample_name,"_") %>% map_chr(.,1))
+Cyclic2$bedname = paste(Cyclic2$sample_name,Cyclic2$amplicon_number,sep = "_")
+
+```
+
+New bed files
+```{r}
+files2 <- data.frame(list.files(path="~/Desktop/Project/PancancerECDNACellLine_classification_results_122320/classification_bed_files", pattern="*.bed", full.names=TRUE, recursive=FALSE))
+colnames(files2) = "file"
+cyclic_files2 = grep(paste(Cyclic2$bedname,collapse="|"), 
+                        files2$file, value=TRUE)
+
+beds2 = lapply(cyclic_files2, function(x) {
+  bed <- as.data.frame(read.table(x,header = FALSE, sep="\t",stringsAsFactors=FALSE, quote="", col.names = c("chromosome","start","end")))
+  bed$cell_line =  strsplit(gsub("/Users/heliz/Desktop/Project/PancancerECDNACellLine_classification_results_122320/classification_bed_files/","",x),'_') %>% map_chr(.,1)
+  return(bed)
+})
+
+data2 = as.data.frame(do.call(rbind, beds2))
+head(data2,10)
+```
+
+Tissue type for new dataset
+```{r}
+cell_lines = data.frame(unique(Cyclic2$cell_line))
+colnames(cell_lines) = "cell_line"
+cell_lines$tissue_type = cell_lines$Cell_line
+cell_lines$tissue_type[1] = "BREAST"
+cell_lines$tissue_type[5] = "LUNG"
+cell_lines$tissue_type[6] = "BREAST"
+cell_lines$tissue_type[7] = "LUNG"
+cell_lines$tissue_type[23] = "COLON"
+cell_lines$tissue_type[22] = "OVARY"
+cell_lines$tissue_type[21] = "PROSTATE"
+cell_lines$tissue_type[20] = "BREAST"
+cell_lines$tissue_type[17] = "BLOOD"
+cell_lines$tissue_type[19] = "MEDULLOBLASTOMA"
+cell_lines$tissue_type[15] = "GLIOBLASTOMA"
+cell_lines$tissue_type[3] = "GLIOBLASTOMA"
+cell_lines$tissue_type[4] = "GLIOBLASTOMA"
+cell_lines$tissue_type[8] = "GLIOBLASTOMA"
+cell_lines$tissue_type[11] = "GLIOBLASTOMA"
+cell_lines$tissue_type[10] = "GLIOBLASTOMA"
+cell_lines$tissue_type[12] = "GLIOBLASTOMA"
+cell_lines$tissue_type[9] = "GLIOBLASTOMA"
+cell_lines$tissue_type[13] = "GLIOBLASTOMA"
+cell_lines$tissue_type[14] = "GLIOBLASTOMA"
+cell_lines$tissue_type[16] = "GLIOBLASTOMA"
+cell_lines$tissue_type[18] = "MEDULLOBLASTOMA"
+cell_lines$tissue_type[2] = "GLIOBLASTOMA"
+
+write.table(cell_lines,"cell_line_tissue.tsv",row.names = F,sep = '\t')
+
+data2 = merge(data2,cell_lines,by = "cell_line")
+
+```
+
+```{r}
+data = rbind(data %>% dplyr::select(chromosome,start,end,tissue_type), data2 %>% dplyr::select(chromosome,start,end,tissue_type))
 ```
 
 
@@ -49,27 +116,6 @@ filters = listFilters(ensembl)
 
 ```
 
-```{r}
-# results=getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position","gene_biotype"),filters = c("chromosomal_region"),values = list(chromosomal_region=unlist(as.list(data$query))), mart = ensembl)
-# results
-
-# gene_in_intervals = lapply(data$query, function(x){
-#   result = getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position","gene_biotype","chromosomal_region"),filters = c("chromosomal_region"),values = x, mart = ensembl)
-#   print(result)
-#   if (dim(result)[1] > 0){
-#     result$source = x
-#   }
-#   return(result)
-# })
-# 
-# genes_in_intervals = as.data.frame(do.call(rbind, gene_in_intervals))
-```
-
-getting location of oncogenes
-```{r}
-oncogenes = read.table("Oncogene list_ONGene.txt",sep="\t",header=T,quote = "")
-
-```
 
 ```{r}
 oncogene_ids=getBM(attributes = c("hgnc_symbol","ensembl_gene_id","start_position", "end_position","chromosome_name"),filters = c("hgnc_symbol"),values = unlist(as.list(oncogenes$OncogeneName)), mart = ensembl)
@@ -97,11 +143,6 @@ for (j in 1:nrow(oncogene_ids)){
   for (i in 1:nrow(data)){
     if ((oncogene_ids[j,'start_position'] >= (data[i,'start'] - oncogene_ids[j,'length']/3)) && (oncogene_ids[j,'end_position'] <= (data[i,'end'] + oncogene_ids[j,'length']/3)) && 
         oncogene_ids[j,'chromosome_name']  == data[i,"chromosome"]){
-      # print(data[i,'tissue_type'])
-      # print(oncogene_ids[j,'start_position'])
-      # print(oncogene_ids[j,'end_position'])
-      # print(data[i,'start'])
-      # print(data[i,'end'])
       oncogene_ids[j,data[i,'tissue_type']] <-  (oncogene_ids[j,data[i,'tissue_type']] + 1)
       ecDNA_loc[oncogene_ids[j,'hgnc_symbol']][[1]] = append(ecDNA_loc[oncogene_ids[j,'hgnc_symbol']][[1]],rbind(data[i,'start'], data[i,'end']))
     }
@@ -117,7 +158,7 @@ write.csv(data,"data.csv",row.names = F)
 ```
 
 ```{r}
-sum_happened = oncogene_ids %>% mutate(sum = rowSums(oncogene_ids[,6:25]))
+sum_happened = oncogene_ids %>% mutate(sum = rowSums(oncogene_ids[,6:29]))
 sum_happened = sum_happened %>% arrange(desc(sum))
 top = sum_happened %>% filter(sum >= 4) %>% dplyr::select(hgnc_symbol)
 
@@ -127,11 +168,11 @@ top = sum_happened %>% filter(sum >= 4) %>% dplyr::select(hgnc_symbol)
 files_df = data.frame(files)
 tissue_types = data.frame(unique(data$tissue_type))
 colnames(tissue_types) = "Tissue"
-files_df = files_df %>% regex_inner_join(tissue_types,by = c(file = "Tissue")) %>% group_by(Tissue) %>% summarise(Files_n = n())
+files_df = files_df %>% regex_inner_join(tissue_types,by = c(file = "Tissue")) %>% group_by(Tissue) %>% dplyr::summarise(Files_n = n())
 
 cyclic_files_df = data.frame(cyclic_files) 
 colnames(cyclic_files_df) = "files"
-cyclic_files_df = cyclic_files_df %>% regex_inner_join(tissue_types,by = c(files = "Tissue")) %>% group_by(Tissue) %>% summarise(Cyclic_n = n())
+cyclic_files_df = cyclic_files_df %>% regex_inner_join(tissue_types,by = c(files = "Tissue")) %>% group_by(Tissue) %>% dplyr::summarise(Cyclic_n = n())
 
 all = inner_join(cyclic_files_df,files_df,by = c(Tissue = "Tissue"))
 
