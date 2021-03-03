@@ -188,13 +188,15 @@ ggsave("tissue_distribution.jpg")
 
 ```{r}
 columns = c("hgnc_symbol",tissue_types$Tissue)
-filtered_table = oncogene_ids[,columns]
-non_zero_oncogenes = filtered_table[apply(filtered_table[,-1], 1, function(x) !all(x==0)),]
-oncogene_sum = non_zero_oncogenes %>% mutate(n_total_oncogene = rowSums(non_zero_oncogenes[,2:21])) %>% arrange(desc(n_total_oncogene))
-write.csv(oncogene_sum,"compacted.csv",row.names = F)
+filtered_table = oncogene_ids[,columns] 
+
+oncogene_compact = filtered_table %>% dplyr::select(which(!colSums(filtered_table[,2:25]) == 0)) %>% mutate(n_total_oncogene = rowSums(filtered_table[,2:25])) %>% arrange(desc(n_total_oncogene)) %>%  filter(n_total_oncogene >= 4) %>% filter(!hgnc_symbol=="MYC")
+write.csv(oncogene_compact,"compacted.csv",row.names = F)
 write.table(all,"tissue_files.tsv",row.names = F)
 ```
 
+
+##intervals
 ```{r}
 top_intervals = ecDNA_loc[top$hgnc_symbol]
 top_df = as.data.frame(as.matrix(top_intervals))
@@ -213,4 +215,5 @@ for (i in 1:nrow(top_df)){
 }
 sink()
 ```
+
 
