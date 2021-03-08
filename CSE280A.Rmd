@@ -49,6 +49,7 @@ Cyclic2 = structures2 %>% filter(amplicon_decomposition_class == "Cyclic")
 Cyclic2 = Cyclic2 %>%  mutate(gene = strsplit(sample_name,"_") %>% map_chr(.,2)) %>% filter(gene %in% oncogenes$OncogeneName) %>% mutate(cell_line = strsplit(sample_name,"_") %>% map_chr(.,1))
 Cyclic2$bedname = paste(Cyclic2$sample_name,Cyclic2$amplicon_number,sep = "_")
 
+
 ```
 
 New bed files
@@ -103,6 +104,7 @@ data2 = merge(data2,cell_lines,by = "cell_line")
 
 ```
 
+joining two datasets
 ```{r}
 data = rbind(data %>% dplyr::select(chromosome,start,end,tissue_type), data2 %>% dplyr::select(chromosome,start,end,tissue_type))
 ```
@@ -116,7 +118,7 @@ filters = listFilters(ensembl)
 
 ```
 
-
+Getting oncogene locations and forming empty oncogene-tissue type
 ```{r}
 oncogene_ids=getBM(attributes = c("hgnc_symbol","ensembl_gene_id","start_position", "end_position","chromosome_name"),filters = c("hgnc_symbol"),values = unlist(as.list(oncogenes$OncogeneName)), mart = ensembl)
 
@@ -137,7 +139,7 @@ ecDNA_loc = vector(mode="list", length=length(oncogene_ids$hgnc_symbol))
 names(ecDNA_loc) = oncogene_ids$hgnc_symbol
 ```
 
-Making Oncogene-Tissue_type Table
+Filling Oncogene-Tissue_type Table
 ```{r}
 for (j in 1:nrow(oncogene_ids)){
   for (i in 1:nrow(data)){
@@ -157,13 +159,14 @@ write.csv(data,"data.csv",row.names = F)
 
 ```
 
+Sum rows 
 ```{r}
 sum_happened = oncogene_ids %>% mutate(sum = rowSums(oncogene_ids[,6:29]))
 sum_happened = sum_happened %>% arrange(desc(sum))
-top = sum_happened %>% filter(sum >= 4) %>% dplyr::select(hgnc_symbol)
-
 ```
 
+
+Distribution of files
 ```{r}
 files_df = data.frame(files)
 tissue_types = data.frame(unique(data$tissue_type))
@@ -178,6 +181,7 @@ all = inner_join(cyclic_files_df,files_df,by = c(Tissue = "Tissue"))
 
 ```
 
+Plot distribution
 ```{r fig.height=5}
 
 all.long = gather(all, variable,value, -Tissue)
@@ -185,19 +189,23 @@ ggplot(data = all.long, aes(x = Tissue, y = value, fill = variable)) +
   geom_col(position = position_dodge(),stat = "identity") + xlab("Tissue Type") + ylab("Number of files") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + geom_text(aes(label = value), position=position_dodge(width=0.9), vjust=-0.25)
 ggsave("tissue_distribution.jpg")
 ```
-
+compacting
 ```{r}
 columns = c("hgnc_symbol",tissue_types$Tissue)
 filtered_table = oncogene_ids[,columns] 
+numbers = filtered_table[,2:25] %>% select_if(colSums(.) != 0)
+numbers$hgnc_symbol = filtered_table$hgnc_symbol
 
-oncogene_compact = filtered_table %>% dplyr::select(which(!colSums(filtered_table[,2:25]) == 0)) %>% mutate(n_total_oncogene = rowSums(filtered_table[,2:25])) %>% arrange(desc(n_total_oncogene)) %>%  filter(n_total_oncogene >= 4) %>% filter(!hgnc_symbol=="MYC")
+oncogene_compact = numbers %>% mutate(n_total_oncogene = rowSums(numbers[,1:19])) %>% arrange(desc(n_total_oncogene)) %>% filter(n_total_oncogene >= 4)
 write.csv(oncogene_compact,"compacted.csv",row.names = F)
+write.csv(filtered_table,"filtered.csv",row.names = F)
 write.table(all,"tissue_files.tsv",row.names = F)
 ```
 
 
 ##intervals
 ```{r}
+top = sum_happened %>% filter(sum >= 4) %>% dplyr::select(hgnc_symbol)
 top_intervals = ecDNA_loc[top$hgnc_symbol]
 top_df = as.data.frame(as.matrix(top_intervals))
 top_df2 = data.frame(lapply(top_df, as.character), stringsAsFactors=FALSE)
@@ -216,4 +224,77 @@ for (i in 1:nrow(top_df)){
 sink()
 ```
 
+```{r}
+data = data %>% mutate(query = paste(paste(gsub("chr","",chromosome),start,sep=":"),end,sep=":"))
+
+
+gene_in_intervals = lapply(data$query, function(x){
+  result = getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position"),filters = c("chromosomal_region"),values = x, mart = ensembl)
+  return(result)
+})
+
+genes_in_intervals = as.data.frame(do.call(rbind, gene_in_intervals))
+```
+
+```{r}
+EGFR = lapply(data$query, function(x){
+  result = getBM(attributes = c("hgnc_symbol","ensembl_gene_id", "chromosome_name", "start_position", "end_position"),filters = c("chromosomal_region"),values = x, mart = ensembl)
+  if (nrow(result) > 0){
+    if(!is.na(result$hgnc_symbol)){
+      if(nrow(result %>% filter(hgnc_symbol == "EGFR")) > 0){
+    print(x)
+  }}}
+  return(result)
+})
+
+
+```
+
+```{r}
+feq = data.frame(table(as.factor(genes_in_intervals$ensembl_gene_id))) %>% filter(Freq > 3)
+colnames(feq) = c("ensembl_gene_id","Freq")
+total <- unique(merge(feq,genes_in_intervals,by="ensembl_gene_id"))
+
+total = total %>% filter(!hgnc_symbol %in% oncogenes$OncogeneName)
+
+added_new = data.frame(matrix(0, nrow = nrow(total), ncol = length(unique(data$tissue_type))))
+colnames(added_new) = unique(data$tissue_type)
+total = cbind(total,added_new)
+total$chromosome_name = paste("chr",total$chromosome_name,sep = "")
+
+
+```
+
+```{r}
+for (j in 1:nrow(total)){
+  for (i in 1:nrow(data)){
+    if ((total[j,'start_position'] >= (data[i,'start'])) && (total[j,'end_position'] <= (data[i,'end'])) && 
+        total[j,'chromosome_name']  == data[i,"chromosome"]){
+      total[j,data[i,'tissue_type']] <-  (total[j,data[i,'tissue_type']] + 1)
+    }
+  }
+}
+```
+
+```{r}
+sum_genes = unique(total %>% mutate(sum = rowSums(total[,7:30])))
+sum_genes[sum_genes == ""] <- NA
+sum_genes = unique(sum_genes) %>% filter(sum >4)
+sum_genes = sum_genes[ , -which(names(sum_genes) %in% c("Freq"))]
+
+                   
+
+```
+
+joining oncogenes and genes
+```{r}
+sum_genes$gene_type = 0
+sum_happened$gene_type = 1
+
+sum_happened_frequent = sum_happened %>% filter(sum > 3)
+sum_happened_frequent = sum_happened_frequent[ , -which(names(sum_happened_frequent) %in% c("length"))]
+
+all = rbind(sum_happened_frequent,sum_genes) %>% arrange(desc(sum))
+all = all[,c(1,2,3,4,5,30,31,6:29)]
+```
 
